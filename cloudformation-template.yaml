@@ -1,0 +1,201 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS EC2 Auto Scaling Web Server Infrastructure Template'
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select the VPC for the Auto Scaling Group
+    
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select subnets for the Auto Scaling Group (minimum 2)
+    
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t3.micro
+      - t3.small
+    Description: EC2 instance type for web servers
+    
+  MinSize:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    Description: Minimum number of instances in Auto Scaling Group
+    
+  MaxSize:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    Description: Maximum number of instances in Auto Scaling Group
+    
+  DesiredCapacity:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    Description: Desired number of instances in Auto Scaling Group
+
+Resources:
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for web servers
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTP traffic
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: Allow SSH for troubleshooting
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-WebServerSecurityGroup'
+        - Key: Project
+          Value: AWS-Auto-Scaling-Web-Server
+
+  WebServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-WebServerRole'
+        - Key: Project
+          Value: AWS-Auto-Scaling-Web-Server
+
+  WebServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref WebServerRole
+
+  WebServerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${AWS::StackName}-WebServerTemplate'
+      LaunchTemplateData:
+        ImageId: ami-0c02fb55956c7d316  # Amazon Linux 2 AMI (update as needed)
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Arn: !GetAtt WebServerInstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref WebServerSecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install -y httpd aws-cli
+            
+            # Install CloudWatch agent
+            wget https://s3.amazonaws.com/amazoncloudwatch-agent/amazon_linux/amd64/latest/amazon-cloudwatch-agent.rpm
+            rpm -U ./amazon-cloudwatch-agent.rpm
+            
+            # Start Apache
+            systemctl start httpd
+            systemctl enable httpd
+            
+            # Create enhanced web page
+            cat > /var/www/html/index.html << 'EOF'
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>AWS Auto Scaling Web Server</title>
+                <style>
+                    body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+                    .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+                    h1 { color: #232f3e; }
+                    .info { background: #e8f4fd; padding: 15px; border-radius: 5px; margin: 20px 0; }
+                    .timestamp { color: #666; font-size: 0.9em; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>🚀 AWS Auto Scaling Web Server</h1>
+                    <div class="info">
+                        <p><strong>Hostname:</strong> $(hostname -f)</p>
+                        <p><strong>Instance ID:</strong> $(curl -s http://169.254.169.254/latest/meta-data/instance-id)</p>
+                        <p><strong>Availability Zone:</strong> $(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)</p>
+                        <p><strong>Instance Type:</strong> $(curl -s http://169.254.169.254/latest/meta-data/instance-type)</p>
+                        <p><strong>Server Time:</strong> $(date)</p>
+                        <p><strong>Stack:</strong> ${AWS::StackName}</p>
+                    </div>
+                    <p>This server was automatically provisioned using AWS Auto Scaling and CloudFormation!</p>
+                    <div class="timestamp">Deployed: $(date)</div>
+                </div>
+            </body>
+            </html>
+            EOF
+            
+            # Set proper permissions
+            chmod 644 /var/www/html/index.html
+            chown apache:apache /var/www/html/index.html
+            
+            # Signal CloudFormation that instance is ready
+            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource WebServerAutoScalingGroup --region ${AWS::Region}
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub '${AWS::StackName}-WebServer'
+              - Key: Project
+                Value: AWS-Auto-Scaling-Web-Server
+
+  WebServerAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${AWS::StackName}-WebServerASG'
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebServerLaunchTemplate
+        Version: !GetAtt WebServerLaunchTemplate.LatestVersionNumber
+      MinSize: !Ref MinSize
+      MaxSize: !Ref MaxSize
+      DesiredCapacity: !Ref DesiredCapacity
+      VPCZoneIdentifier: !Ref SubnetIds
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-WebServer'
+          PropagateAtLaunch: true
+        - Key: Project
+          Value: AWS-Auto-Scaling-Web-Server
+          PropagateAtLaunch: true
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref DesiredCapacity
+        Timeout: PT15M
+
+Outputs:
+  AutoScalingGroupName:
+    Description: Name of the Auto Scaling Group
+    Value: !Ref WebServerAutoScalingGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-ASG-Name'
+      
+  SecurityGroupId:
+    Description: Security Group ID for web servers
+    Value: !Ref WebServerSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityGroup-Id'
+      
+  LaunchTemplateId:
+    Description: Launch Template ID
+    Value: !Ref WebServerLaunchTemplate
+    Export:
+      Name: !Sub '${AWS::StackName}-LaunchTemplate-Id'

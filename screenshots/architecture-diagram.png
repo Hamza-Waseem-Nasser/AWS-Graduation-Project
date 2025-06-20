@@ -1,0 +1,5 @@
+AWS EC2 Auto Scaling Web Server
+
+User → Elastic Load Balancer → Auto Scaling Group (EC2 instances) → User Data Script → AMI
+
+This diagram shows the flow from user requests through the load balancer to the auto scaling group containing EC2 instances, which are configured using user data scripts and based on an AMI.
