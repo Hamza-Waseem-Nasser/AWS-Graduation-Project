@@ -1,0 +1,17 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Validate Project Files",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-Command",
+				"Write-Host 'AWS Auto Scaling Project Validation' -ForegroundColor Green; Write-Host '=================================' -ForegroundColor Green; Write-Host 'Checking project files...' -ForegroundColor Yellow; if (Test-Path 'README.md') { Write-Host '✓ README.md found' -ForegroundColor Green } else { Write-Host '✗ README.md missing' -ForegroundColor Red }; if (Test-Path 'user-data-script.sh') { Write-Host '✓ User data script found' -ForegroundColor Green } else { Write-Host '✗ User data script missing' -ForegroundColor Red }; if (Test-Path 'demo-script.txt') { Write-Host '✓ Demo script found' -ForegroundColor Green } else { Write-Host '✗ Demo script missing' -ForegroundColor Red }; if (Test-Path 'deployment-guide.md') { Write-Host '✓ Deployment guide found' -ForegroundColor Green } else { Write-Host '✗ Deployment guide missing' -ForegroundColor Red }; Write-Host 'Project structure:' -ForegroundColor Yellow; Get-ChildItem -Recurse | Select-Object Name, Length | Format-Table -AutoSize"
+			],
+			"group": "build",
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}
